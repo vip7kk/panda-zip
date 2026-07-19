@@ -1,17 +1,81 @@
 export async function onRequest(context) {
 
 
+const env=context.env;
+
+
+try{
+
+
+const month=
+
+new Date()
+
+.toISOString()
+
+.slice(0,7);
+
+
+
+
+let data=
+
+await env.TINIFY_KV.get(
+
+"tinify_stats",
+
+"json"
+
+);
+
+
+
+
+
+
+if(
+
+!data
+
+||
+
+data.month!==month
+
+){
+
+
+data={
+
+month:month,
+
+used:0
+
+};
+
+
+}
+
+
+
+
+
 return new Response(
 
 JSON.stringify({
 
-envKeys:Object.keys(context.env),
+used:data.used,
 
-hasKV:!!context.env.TINIFY_KV,
+limit:1000,
 
-hasKey1:!!context.env.TINIFY_KEY1,
+remaining:
 
-hasKey2:!!context.env.TINIFY_KEY2
+Math.max(
+
+0,
+
+1000-data.used
+
+)
 
 }),
 
@@ -19,13 +83,57 @@ hasKey2:!!context.env.TINIFY_KEY2
 
 headers:{
 
-"Content-Type":"application/json"
+"Content-Type":
+
+"application/json",
+
+"Access-Control-Allow-Origin":
+
+"*"
 
 }
 
 }
 
 );
+
+
+
+}catch(e){
+
+
+
+return new Response(
+
+JSON.stringify({
+
+error:e.message
+
+}),
+
+{
+
+status:500,
+
+headers:{
+
+"Content-Type":
+
+"application/json",
+
+"Access-Control-Allow-Origin":
+
+"*"
+
+}
+
+}
+
+);
+
+
+
+}
 
 
 }
