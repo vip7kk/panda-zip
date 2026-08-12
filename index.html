@@ -250,6 +250,66 @@ h1 .accent::after {
 }
 input[type="file"] { display: none; }
 
+/* ===== 在线链接输入区 ===== */
+.url-section {
+  margin-top: 18px;
+}
+.url-divider {
+  display: flex;
+  align-items: center;
+  color: rgba(255,255,255,0.38);
+  font-size: 13px;
+  margin: 4px 0 14px;
+  letter-spacing: 1px;
+}
+.url-divider::before,
+.url-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255,255,255,0.1);
+}
+.url-divider span { padding: 0 14px; }
+.url-input-row {
+  display: flex;
+  gap: 10px;
+}
+.url-input {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.05);
+  color: #fff;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+}
+.url-input::placeholder { color: rgba(255,255,255,0.35); }
+.url-input:focus {
+  border-color: var(--panda-blue);
+  background: rgba(255,255,255,0.08);
+  box-shadow: 0 0 15px rgba(79,195,247,0.2);
+}
+.btn-add-url {
+  padding: 0 22px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--panda-blue), var(--panda-purple));
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.btn-add-url:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(79,195,247,0.3);
+}
+.btn-add-url:active { transform: translateY(0); }
+
 /* ===== 文件列表 ===== */
 .files {
   margin-top: 20px;
@@ -564,6 +624,7 @@ input[type="file"] { display: none; }
   <div class="info">
     最多 <b>50</b> 张图片<br>
     单张最大 <b>10MB</b><br>
+    🌐 支持在线图片链接<br>
     自动ZIP下载 🎁
   </div>
 
@@ -575,6 +636,14 @@ input[type="file"] { display: none; }
     <span class="upload-text-sub">或拖拽图片到这里</span>
     <input id="files" type="file" multiple accept="image/*">
   </label>
+
+  <div class="url-section">
+    <div class="url-divider"><span>🌐 或粘贴在线图片链接</span></div>
+    <div class="url-input-row">
+      <input type="text" id="urlInput" class="url-input" placeholder="粘贴图片链接，回车添加（支持多行/空格分隔）">
+      <button type="button" id="addUrlBtn" class="btn-add-url">＋ 添加</button>
+    </div>
+  </div>
 
   <div class="files" id="list"></div>
 
@@ -665,7 +734,10 @@ uploadArea.addEventListener('drop', e => {
 });
 
 // ===== 核心功能逻辑（保留原有） =====
-let selected = [];
+let localFiles = [];
+let urlItems = [];
+function getTotal() { return localFiles.length + urlItems.length; }
+
 const input = document.getElementById('files');
 const list = document.getElementById('list');
 const startBtn = document.getElementById('start');
@@ -673,6 +745,8 @@ const countBox = document.getElementById('count');
 const result = document.getElementById('result');
 const progress = document.getElementById('progress');
 const bar = document.getElementById('bar');
+const urlInput = document.getElementById('urlInput');
+const addUrlBtn = document.getElementById('addUrlBtn');
 
 function formatSize(size) {
   if (size >= 1024 * 1024) {
@@ -681,29 +755,66 @@ function formatSize(size) {
   return (size / 1024).toFixed(2) + ' KB';
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
 function render() {
   list.innerHTML = '';
-  selected.forEach((file, index) => {
+  let pos = 0;
+  localFiles.forEach((file, index) => {
     const div = document.createElement('div');
     div.className = 'file';
-    div.style.animationDelay = (index * 0.05) + 's';
+    div.style.animationDelay = (pos++ * 0.05) + 's';
     div.innerHTML =
-      '<span class="file-name">🖼️ ' + file.name + '</span>' +
+      '<span class="file-name">🖼️ ' + escapeHtml(file.name) + '</span>' +
       '<span class="file-size">' + formatSize(file.size) + '</span>' +
-      '<button class="delete-btn" data-index="' + index + '">×</button>';
+      '<button class="delete-btn" data-type="file" data-index="' + index + '">×</button>';
     list.appendChild(div);
   });
-  startBtn.disabled = selected.length === 0;
+  urlItems.forEach((url, index) => {
+    const div = document.createElement('div');
+    div.className = 'file';
+    div.style.animationDelay = (pos++ * 0.05) + 's';
+    const label = url.length > 42 ? url.slice(0, 42) + '…' : url;
+    div.innerHTML =
+      '<span class="file-name">🔗 ' + escapeHtml(label) + '</span>' +
+      '<span class="file-size">在线图片</span>' +
+      '<button class="delete-btn" data-type="url" data-index="' + index + '">×</button>';
+    list.appendChild(div);
+  });
+  startBtn.disabled = getTotal() === 0;
 }
 
 function addFiles(files) {
   for (const file of files) {
     if (file.type.startsWith('image/')) {
-      selected.push(file);
+      localFiles.push(file);
     }
   }
-  if (selected.length > 50) {
-    selected = selected.slice(0, 50);
+  const maxLocal = 50 - urlItems.length;
+  if (localFiles.length > maxLocal) {
+    localFiles = localFiles.slice(0, maxLocal);
+    alert('最多只能选择50张图片');
+  }
+  render();
+}
+
+function addUrl(raw) {
+  const lines = String(raw).split(/[\s,，]+/).filter(Boolean);
+  if (lines.length === 0) return;
+  for (const line of lines) {
+    if (/^https?:\/\//i.test(line.trim())) {
+      urlItems.push(line.trim());
+    } else if (line.trim()) {
+      alert('不是有效的图片链接（需以 http/https 开头）：' + line.trim());
+    }
+  }
+  const maxUrl = 50 - localFiles.length;
+  if (urlItems.length > maxUrl) {
+    urlItems = urlItems.slice(0, maxUrl);
     alert('最多只能选择50张图片');
   }
   render();
@@ -713,16 +824,33 @@ input.addEventListener('change', e => {
   addFiles(e.target.files);
 });
 
+addUrlBtn.addEventListener('click', () => {
+  addUrl(urlInput.value);
+  urlInput.value = '';
+});
+urlInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addUrl(urlInput.value);
+    urlInput.value = '';
+  }
+});
+
 document.addEventListener('click', e => {
   if (e.target.classList.contains('delete-btn')) {
+    const type = e.target.dataset.type;
     const index = Number(e.target.dataset.index);
-    selected.splice(index, 1);
+    if (type === 'url') {
+      urlItems.splice(index, 1);
+    } else {
+      localFiles.splice(index, 1);
+    }
     render();
   }
 });
 
 startBtn.onclick = async () => {
-  if (selected.length === 0) return;
+  if (getTotal() === 0) return;
 
   startBtn.disabled = true;
   progress.innerHTML = '🐼 正在压缩...';
@@ -733,9 +861,10 @@ startBtn.onclick = async () => {
   result.className = 'result';
 
   const form = new FormData();
-  selected.forEach(file => {
+  localFiles.forEach(file => {
     form.append('files', file);
   });
+  form.append('urls', JSON.stringify(urlItems));
 
   try {
     const res = await fetch('/compress', {
@@ -751,7 +880,7 @@ startBtn.onclick = async () => {
 
     const before = Number(res.headers.get('X-Before-Size'));
     const after = Number(res.headers.get('X-After-Size'));
-    const percent = ((before - after) / before * 100).toFixed(2);
+    const percent = before > 0 ? ((before - after) / before * 100).toFixed(2) : '0.00';
 
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -769,7 +898,8 @@ startBtn.onclick = async () => {
       '节省：<b>' + percent + '%</b> 🎉';
     result.className = 'result show';
 
-    selected = [];
+    localFiles = [];
+    urlItems = [];
     render();
 
     progress.innerHTML = '✨ 压缩完成！熊猫为你鼓掌 🐼👏';

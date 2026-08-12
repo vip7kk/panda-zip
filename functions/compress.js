@@ -1,15 +1,12 @@
 export async function onRequest(context){
 
-
 const request=context.request;
 
 const env=context.env;
 
 
 
-
 if(request.method==="OPTIONS"){
-
 
 return new Response(
 
@@ -35,16 +32,11 @@ headers:{
 
 );
 
-
 }
 
 
 
-
-
-
 if(request.method!=="POST"){
-
 
 return new Response(
 
@@ -58,11 +50,7 @@ status:405
 
 );
 
-
 }
-
-
-
 
 
 
@@ -76,18 +64,107 @@ await request.formData();
 
 
 
-
-const files=
+const fileEntries=
 
 form.getAll("files");
 
 
 
+let urls=[];
+
+try{
+
+urls=
+
+JSON.parse(
+
+form.get("urls")||"[]"
+
+);
+
+}catch(e){
+
+urls=[];
+
+}
+
+if(!Array.isArray(urls)){
+
+urls=[];
+
+}
 
 
 
-if(files.length===0){
+// 组装图片源：本地文件 + 在线链接（服务端抓取）
 
+const sources=[];
+
+for(const f of fileEntries){
+
+if(
+
+f &&
+
+typeof f.arrayBuffer==="function"
+
+){
+
+sources.push({
+
+name:f.name||"image.png",
+
+buffer:await f.arrayBuffer()
+
+});
+
+}
+
+}
+
+for(const u of urls){
+
+const trimmed=
+
+typeof u==="string"?u.trim():"";
+
+if(!trimmed) continue;
+
+try{
+
+const resp=
+
+await fetch(
+
+trimmed,
+
+{redirect:"follow"}
+
+);
+
+if(!resp.ok) continue;
+
+const buf=
+
+await resp.arrayBuffer();
+
+sources.push({
+
+name:urlToName(trimmed),
+
+buffer:buf
+
+});
+
+}catch(e){
+
+}
+
+}
+
+
+
+if(sources.length===0){
 
 throw new Error(
 
@@ -95,15 +172,11 @@ throw new Error(
 
 );
 
-
 }
 
 
 
-
-
-if(files.length>50){
-
+if(sources.length>50){
 
 throw new Error(
 
@@ -111,12 +184,7 @@ throw new Error(
 
 );
 
-
 }
-
-
-
-
 
 
 
@@ -130,11 +198,7 @@ env.TINIFY_KEY2
 
 
 
-
-
-
 if(keys.length===0){
-
 
 throw new Error(
 
@@ -142,13 +206,7 @@ throw new Error(
 
 );
 
-
 }
-
-
-
-
-
 
 
 
@@ -156,23 +214,15 @@ let before=0;
 
 let after=0;
 
-
-
 let zipFiles={};
 
+const usedNames={};
 
 
 
+for(const src of sources){
 
-
-for(const file of files){
-
-
-
-before += file.size;
-
-
-
+before += src.buffer.byteLength;
 
 
 
@@ -180,7 +230,7 @@ const result=
 
 await tinifyCompress(
 
-file,
+src,
 
 keys
 
@@ -188,30 +238,49 @@ keys
 
 
 
-
-
-
 if(result){
-
-
 
 after += result.data.length;
 
+let finalName=result.name;
 
+if(usedNames[finalName]){
 
-zipFiles[result.name]=result.data;
+const dot=
 
+finalName.lastIndexOf(".");
 
+const base=
+
+dot>-1?
+
+finalName.slice(0,dot):
+
+finalName;
+
+const ext=
+
+dot>-1?
+
+finalName.slice(dot):
+
+"";
+
+let n=1;
+
+while(usedNames[base+"_"+n+ext]) n++;
+
+finalName=base+"_"+n+ext;
 
 }
 
+usedNames[finalName]=true;
 
+zipFiles[finalName]=result.data;
 
 }
 
-
-
-
+}
 
 
 
@@ -221,18 +290,13 @@ Object.keys(zipFiles).length===0
 
 ){
 
-
 throw new Error(
 
 "所有图片压缩失败"
 
 );
 
-
 }
-
-
-
 
 
 
@@ -240,23 +304,15 @@ await addQuota(
 
 env,
 
-files.length
+sources.length
 
 );
-
-
-
-
 
 
 
 const zip=
 
 createZip(zipFiles);
-
-
-
-
 
 
 
@@ -294,9 +350,6 @@ String(after)
 
 
 
-
-
-
 }catch(e){
 
 
@@ -319,28 +372,23 @@ headers:{
 
 );
 
-
-
 }
 
 
 
 }
-
-
-
-
-
-
 
 
 
 // ==========================
+
 // Tinify
+
 // ==========================
 
 
-async function tinifyCompress(file,keys){
+
+async function tinifyCompress(source,keys){
 
 
 
@@ -378,11 +426,13 @@ btoa(
 
 body:
 
-await file.arrayBuffer()
+source.buffer
 
 }
 
 );
+
+
 
 
 
@@ -399,9 +449,11 @@ continue;
 
 
 
+
 const json=
 
 await upload.json();
+
 
 
 
@@ -439,9 +491,10 @@ json.output.url
 
 
 
+
 return {
 
-name:file.name,
+name:source.name,
 
 data:
 
@@ -467,16 +520,60 @@ await result.arrayBuffer()
 
 
 
-
-
 return null;
 
 
 
 }
+
 // ==========================
+
+// 从链接推导文件名
+
+// ==========================
+
+
+
+function urlToName(url){
+
+try{
+
+const u=new URL(url);
+
+let name=
+
+u.pathname
+
+.split("/")
+
+.pop()||"image";
+
+const q=name.indexOf("?");
+
+if(q>-1) name=name.slice(0,q);
+
+if(!/\.[a-z0-9]+$/i.test(name)){
+
+name+=".png";
+
+}
+
+return name;
+
+}catch(e){
+
+return "image.png";
+
+}
+
+}
+
+// ==========================
+
 // KV次数增加
+
 // ==========================
+
 
 
 async function addQuota(env,num){
@@ -493,8 +590,6 @@ new Date()
 
 
 
-
-
 let data=
 
 await env.TINIFY_KV.get(
@@ -504,9 +599,6 @@ await env.TINIFY_KV.get(
 "json"
 
 );
-
-
-
 
 
 
@@ -520,7 +612,6 @@ data.month!==month
 
 ){
 
-
 data={
 
 month:month,
@@ -529,20 +620,11 @@ used:0
 
 };
 
-
-
 }
 
 
 
-
-
-
 data.used += num;
-
-
-
-
 
 
 
@@ -560,15 +642,12 @@ JSON.stringify(data)
 
 
 
-
-
-
-
-
-
 // ==========================
+
 // ZIP
+
 // ==========================
+
 
 
 function createZip(files){
@@ -599,13 +678,9 @@ new TextEncoder()
 
 
 
-
-
 const crc=
 
 crc32(data);
-
-
 
 
 
@@ -700,6 +775,7 @@ true
 
 
 
+
 local.push(
 
 header,
@@ -709,9 +785,6 @@ nameBytes,
 data
 
 );
-
-
-
 
 
 
@@ -728,8 +801,6 @@ new DataView(
 center.buffer
 
 );
-
-
 
 
 
@@ -843,10 +914,6 @@ nameBytes
 
 
 
-
-
-
-
 offset +=
 
 header.length+
@@ -861,10 +928,6 @@ data.length;
 
 
 
-
-
-
-
 const centralSize=
 
 central.reduce(
@@ -874,8 +937,6 @@ central.reduce(
 0
 
 );
-
-
 
 
 
@@ -892,8 +953,6 @@ new DataView(
 end.buffer
 
 );
-
-
 
 
 
@@ -960,6 +1019,7 @@ true
 
 
 
+
 return concat([
 
 ...local,
@@ -976,15 +1036,7 @@ end
 
 
 
-
-
-
-
-
-
 function concat(arr){
-
-
 
 let length=0;
 
@@ -1010,8 +1062,6 @@ let pos=0;
 
 arr.forEach(a=>{
 
-
-
 result.set(
 
 a,
@@ -1020,14 +1070,9 @@ pos
 
 );
 
-
-
 pos+=a.length;
 
-
-
 });
-
 
 
 
@@ -1039,20 +1084,15 @@ return result;
 
 
 
-
-
-
-
-
-
 // ==========================
+
 // CRC32
+
 // ==========================
+
 
 
 function crc32(data){
-
-
 
 let table=[];
 
@@ -1060,15 +1100,11 @@ let table=[];
 
 for(let i=0;i<256;i++){
 
-
-
 let c=i;
 
 
 
 for(let j=0;j<8;j++){
-
-
 
 c=
 
@@ -1082,21 +1118,11 @@ c=
 
 c>>>1;
 
-
-
 }
-
-
 
 table[i]=c;
 
-
-
 }
-
-
-
-
 
 
 
@@ -1106,12 +1132,7 @@ let crc=
 
 
 
-
-
-
 for(const byte of data){
-
-
 
 crc=
 
@@ -1125,11 +1146,7 @@ table[
 
 (crc>>>8);
 
-
-
 }
-
-
 
 
 
@@ -1138,7 +1155,5 @@ return (
 crc^0xffffffff
 
 )>>>0;
-
-
 
 }
